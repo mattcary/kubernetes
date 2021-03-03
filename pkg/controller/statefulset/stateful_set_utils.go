@@ -28,10 +28,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/controller"
 	"k8s.io/kubernetes/pkg/controller/history"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 var patchCodec = scheme.Codecs.LegacyCodec(apps.SchemeGroupVersion)
@@ -88,6 +91,18 @@ func getPodName(set *apps.StatefulSet, ordinal int) string {
 	return fmt.Sprintf("%s-%d", set.Name, ordinal)
 }
 
+// getClaimPodName gets the name of the Pod associated with the Claim, or an empty string if this doesn't look matching.
+func getClaimPodName(set *apps.StatefulSet, claim *v1.PersistentVolumeClaim) string {
+	podName := ""
+
+	statefulClaimRegex := regexp.MustCompile(fmt.Sprintf(".*-(%s-[0-9]+)$", set.Name))
+	matches := statefulClaimRegex.FindStringSubmatch(claim.Name)
+	if len(matches) != 2 {
+		return podName
+	}
+	return matches[1]
+}
+
 // getPersistentVolumeClaimName gets the name of PersistentVolumeClaim for a Pod with an ordinal index of ordinal. claim
 // must be a PersistentVolumeClaim from set's VolumeClaims template.
 func getPersistentVolumeClaimName(set *apps.StatefulSet, claim *v1.PersistentVolumeClaim, ordinal int) string {
@@ -129,6 +144,163 @@ func storageMatches(set *apps.StatefulSet, pod *v1.Pod) bool {
 			return false
 		}
 	}
+	return true
+}
+
+// getPersistentVolumeClaimDeletePolicy returns the PVC delete policy for a StatefulSet, respecting
+// any feature flags.
+func getPersistentVolumeClaimDeletePolicy(set *apps.StatefulSet) apps.PersistentVolumeClaimDeletePolicyType {
+	policy := apps.RetainPersistentVolumeClaimDeletePolicyType
+	if utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) && set.Spec.PersistentVolumeClaimDeletePolicy != nil {
+		policy = *set.Spec.PersistentVolumeClaimDeletePolicy
+	}
+	return policy
+}
+
+// claimOwnerMatchesSetAndPod returns false if the ownerRefs of the claim are not set consistently with the
+// PVC deletion policy for the StatefulSet.
+func claimOwnerMatchesSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.StatefulSet, pod *v1.Pod) bool {
+	policy := getPersistentVolumeClaimDeletePolicy(set)
+	switch policy {
+	default:
+		klog.Errorf("Unknown policy %v; treating as Retain", set.Spec.PersistentVolumeClaimDeletePolicy)
+		fallthrough
+	case apps.RetainPersistentVolumeClaimDeletePolicyType:
+		if hasOwnerRef(claim, set) ||
+			hasOwnerRef(claim, pod) {
+			return false
+		}
+	case apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType:
+		if !hasOwnerRef(claim, set) ||
+			hasOwnerRef(claim, pod) {
+			return false
+		}
+	case apps.DeleteOnScaledownOnlyPersistentVolumeClaimDeletePolicyType:
+		if hasOwnerRef(claim, set) {
+			return false
+		}
+		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
+		if podScaledDown != hasOwnerRef(claim, pod) {
+			return false
+		}
+	case apps.DeleteOnScaledownAndStatefulSetDeletionPersistentVolumeClaimDeletePolicyType:
+		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
+		// If a pod is scaled down, there should be no set ref and a pod ref;
+		// if the pod is not scaled down it's the other way around.
+		if podScaledDown == hasOwnerRef(claim, set) {
+			return false
+		}
+		if podScaledDown != hasOwnerRef(claim, pod) {
+			return false
+		}
+	}
+	return true
+}
+
+// updateClaimOwnerRefForSetAndPod updates the ownerRefs for the claim according to the deletion policy of
+// the StatefulSet. Returns true if the claim was changed and should be updated and false otherwise.
+func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.StatefulSet, pod *v1.Pod) bool {
+	needsUpdate := false
+	// Sometimes the version and kind are not set pod.TypeMeta. These are necessary for the ownerRef.
+	// TODO: there must be a better way to do this other than hardcoding the pod version?
+	podMeta := pod.TypeMeta
+	if podMeta.APIVersion == "" {
+		podMeta.APIVersion = "v1"
+	}
+	if podMeta.Kind == "" {
+		podMeta.Kind = "Pod"
+	}
+	policy := getPersistentVolumeClaimDeletePolicy(set)
+	switch policy {
+	default:
+		klog.Errorf("Unknown policy %v, treating as Retain", set.Spec.PersistentVolumeClaimDeletePolicy)
+		fallthrough
+	case apps.RetainPersistentVolumeClaimDeletePolicyType:
+		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
+		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
+	case apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType:
+		needsUpdate = setOwnerRef(claim, set, &set.TypeMeta) || needsUpdate
+		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
+	case apps.DeleteOnScaledownOnlyPersistentVolumeClaimDeletePolicyType:
+		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
+		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
+		if podScaledDown {
+			needsUpdate = setOwnerRef(claim, pod, &podMeta) || needsUpdate
+		}
+		if !podScaledDown {
+			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
+		}
+	case apps.DeleteOnScaledownAndStatefulSetDeletionPersistentVolumeClaimDeletePolicyType:
+		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
+		if podScaledDown {
+			needsUpdate = removeOwnerRef(claim, set) || needsUpdate
+			needsUpdate = setOwnerRef(claim, pod, &podMeta) || needsUpdate
+		}
+		if !podScaledDown {
+			needsUpdate = setOwnerRef(claim, set, &set.TypeMeta) || needsUpdate
+			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
+		}
+	}
+	return needsUpdate
+}
+
+// hasOwnerRef returns true if target has an ownerRef to owner.
+func hasOwnerRef(target, owner metav1.Object) bool {
+	ownerUID := owner.GetUID()
+	for _, ownerRef := range target.GetOwnerReferences() {
+		if ownerRef.UID == ownerUID {
+			return true
+		}
+	}
+	return false
+}
+
+// hasStaleOwnerRef returns true if target has a ref to owner that appears to be stale.
+func hasStaleOwnerRef(target, owner metav1.Object) bool {
+	for _, ownerRef := range target.GetOwnerReferences() {
+		if ownerRef.Name == owner.GetName() && ownerRef.UID != owner.GetUID() {
+			return true
+		}
+	}
+	return false
+}
+
+// setOwnerRef adds owner to the ownerRefs of target, if necessary. Returns true if target needs to be
+// updated and false otherwise.
+func setOwnerRef(target, owner metav1.Object, ownerType *metav1.TypeMeta) bool {
+	if hasOwnerRef(target, owner) {
+		return false
+	}
+	ownerRefs := append(
+		target.GetOwnerReferences(),
+		metav1.OwnerReference{
+			APIVersion: ownerType.APIVersion,
+			Kind:       ownerType.Kind,
+			Name:       owner.GetName(),
+			UID:        owner.GetUID(),
+		})
+	target.SetOwnerReferences(ownerRefs)
+	return true
+}
+
+// removeOwnerRef removes owner from the ownerRefs of target, if necessary. Returns true if target needs
+// to be updated and false otherwise.
+func removeOwnerRef(target, owner metav1.Object) bool {
+	if !hasOwnerRef(target, owner) {
+		return false
+	}
+	ownerUID := owner.GetUID()
+	oldRefs := target.GetOwnerReferences()
+	newRefs := make([]metav1.OwnerReference, len(oldRefs)-1)
+	skip := 0
+	for i := range oldRefs {
+		if oldRefs[i].UID == ownerUID {
+			skip = -1
+		} else {
+			newRefs[i+skip] = oldRefs[i]
+		}
+	}
+	target.SetOwnerReferences(newRefs)
 	return true
 }
 

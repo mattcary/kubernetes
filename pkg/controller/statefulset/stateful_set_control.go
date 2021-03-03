@@ -51,7 +51,7 @@ type StatefulSetControlInterface interface {
 // to update the status of StatefulSets. You should use an instance returned from NewRealStatefulPodControl() for any
 // scenario other than testing.
 func NewDefaultStatefulSetControl(
-	podControl StatefulPodControlInterface,
+	podControl *StatefulPodControl,
 	statusUpdater StatefulSetStatusUpdaterInterface,
 	controllerHistory history.Interface,
 	recorder record.EventRecorder) StatefulSetControlInterface {
@@ -59,7 +59,7 @@ func NewDefaultStatefulSetControl(
 }
 
 type defaultStatefulSetControl struct {
-	podControl        StatefulPodControlInterface
+	podControl        *StatefulPodControl
 	statusUpdater     StatefulSetStatusUpdaterInterface
 	controllerHistory history.Interface
 	recorder          record.EventRecorder
@@ -408,6 +408,12 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 		}
 		// If we find a Pod that has not been created we create the Pod
 		if !isCreated(replicas[i]) {
+			if isStale, err := ssc.podControl.PodClaimIsStale(set, replicas[i]); err != nil {
+				return &status, err
+			} else if isStale {
+				// If a pod has a stale PVC, no more work can be done this round.
+				return &status, err
+			}
 			if err := ssc.podControl.CreateStatefulPod(set, replicas[i]); err != nil {
 				return &status, err
 			}
@@ -418,7 +424,6 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			if getPodRevision(replicas[i]) == updateRevision.Name {
 				status.UpdatedReplicas++
 			}
-
 			// if the set does not allow bursting, return immediately
 			if monotonic {
 				return &status, nil
@@ -447,14 +452,21 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 				replicas[i].Name)
 			return &status, nil
 		}
-		// Enforce the StatefulSet invariants
-		if identityMatches(set, replicas[i]) && storageMatches(set, replicas[i]) {
-			continue
-		}
-		// Make a deep copy so we don't mutate the shared cache
+		// Enforce the StatefulSet invariants, making a deep copy so we don't mutate the shared cache
 		replica := replicas[i].DeepCopy()
 		if err := ssc.podControl.UpdateStatefulPod(updateSet, replica); err != nil {
 			return &status, err
+		}
+	}
+
+	// Ensure ownerRefs are set correctly for the condemned pods.
+	for i := range condemned {
+		if matchPolicy, err := ssc.podControl.ClaimsMatchDeletionPolicy(updateSet, condemned[i]); err != nil {
+			return &status, err
+		} else if !matchPolicy {
+			if err := ssc.podControl.UpdatePodClaimForDeletionPolicy(updateSet, condemned[i]); err != nil {
+				return &status, err
+			}
 		}
 	}
 
