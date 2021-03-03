@@ -91,9 +91,8 @@ func NewStatefulSetController(
 	ssc := &StatefulSetController{
 		kubeClient: kubeClient,
 		control: NewDefaultStatefulSetControl(
-			NewRealStatefulPodControl(
+			NewStatefulPodControl(
 				kubeClient,
-				setInformer.Lister(),
 				podInformer.Lister(),
 				pvcInformer.Lister(),
 				recorder),

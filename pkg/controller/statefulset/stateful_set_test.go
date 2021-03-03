@@ -650,7 +650,109 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 	}
 }
 
-func newFakeStatefulSetController(initialObjects ...runtime.Object) (*StatefulSetController, *fakeStatefulPodControl, history.Interface) {
+func TestStaleOwnerRefOnScaleup(t *testing.T) {
+	for _, policy := range []apps.PersistentVolumeClaimDeletePolicyType{
+		apps.DeleteOnScaledownOnlyPersistentVolumeClaimDeletePolicyType,
+		apps.DeleteOnScaledownAndStatefulSetDeletionPersistentVolumeClaimDeletePolicyType,
+	} {
+		onPolicy := func(msg string, args ...interface{}) string {
+			return fmt.Sprintf(fmt.Sprintf("(%s) %s", policy, msg), args...)
+		}
+		set := newStatefulSet(3)
+		set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+		ssc, spc, om, _ := newFakeStatefulSetController(set)
+		if err := scaleUpStatefulSetController(set, ssc, spc, om); err != nil {
+			t.Errorf(onPolicy("Failed to turn up StatefulSet : %s", err))
+		}
+		var err error
+		if set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name); err != nil {
+			t.Errorf(onPolicy("Could not get scaled up set: %v", err))
+		}
+		if set.Status.Replicas != 3 {
+			t.Errorf(onPolicy("set.Status.Replicas = %v; want 3", set.Status.Replicas))
+		}
+		*set.Spec.Replicas = 2
+		if err := scaleDownStatefulSetController(set, ssc, spc, om); err != nil {
+			t.Errorf(onPolicy("Failed to scale down StatefulSet : msg, %s", err))
+		}
+		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
+		if err != nil {
+			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+		}
+		if set.Status.Replicas != 2 {
+			t.Errorf(onPolicy("Failed to scale statefulset to 2 replicas"))
+		}
+
+		var claim *v1.PersistentVolumeClaim
+		claim, err = om.claimsLister.PersistentVolumeClaims(set.Namespace).Get("datadir-foo-2")
+		if err != nil {
+			t.Errorf(onPolicy("Could not find expected pvc datadir-foo-2"))
+		}
+		refs := claim.GetOwnerReferences()
+		if len(refs) != 1 {
+			t.Errorf(onPolicy("Expected only one refs: %v", refs))
+		}
+		// Make the pod ref stale.
+		for i := range refs {
+			if refs[i].Name == "foo-2" {
+				refs[i].UID = "stale"
+				break
+			}
+		}
+		claim.SetOwnerReferences(refs)
+		if err = om.claimsIndexer.Update(claim); err != nil {
+			t.Errorf(onPolicy("Could not update claim with new owner ref: %v", err))
+		}
+
+		*set.Spec.Replicas = 3
+		// Until the stale PVC goes away, the scale up should never finish. Run 10 iterations, then delete the PVC.
+		if err := scaleUpStatefulSetControllerBounded(set, ssc, spc, om, 10); err != nil {
+			t.Errorf(onPolicy("Failed attempt to scale StatefulSet back up: %v", err))
+		}
+		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
+		if err != nil {
+			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+		}
+		if set.Status.Replicas != 2 {
+			t.Errorf(onPolicy("Expected set to stay at two replicas"))
+		}
+
+		claim, err = om.claimsLister.PersistentVolumeClaims(set.Namespace).Get("datadir-foo-2")
+		if err != nil {
+			t.Errorf(onPolicy("Could not find expected pvc datadir-foo-2"))
+		}
+		refs = claim.GetOwnerReferences()
+		if len(refs) != 1 {
+			t.Errorf(onPolicy("Unexpected change to condemned pvc ownerRefs: %v", refs))
+		}
+		foundPodRef := false
+		for i := range refs {
+			if refs[i].UID == "stale" {
+				foundPodRef = true
+				break
+			}
+		}
+		if !foundPodRef {
+			t.Errorf(onPolicy("Claim ref unexpectedly changed: %v", refs))
+		}
+		if err = om.claimsIndexer.Delete(claim); err != nil {
+			t.Errorf(onPolicy("Could not delete stale pvc: %v", err))
+		}
+
+		if err := scaleUpStatefulSetController(set, ssc, spc, om); err != nil {
+			t.Errorf(onPolicy("Failed to scale StatefulSet back up: %v", err))
+		}
+		set, err = om.setsLister.StatefulSets(set.Namespace).Get(set.Name)
+		if err != nil {
+			t.Errorf(onPolicy("Could not get scaled down StatefulSet: %v", err))
+		}
+		if set.Status.Replicas != 3 {
+			t.Errorf(onPolicy("Failed to scale set back up once PVC was deleted"))
+		}
+	}
+}
+
+func newFakeStatefulSetController(initialObjects ...runtime.Object) (*StatefulSetController, *StatefulPodControl, *fakeObjectManager, history.Interface) {
 	client := fake.NewSimpleClientset(initialObjects...)
 	informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
 	fpc := newFakeStatefulPodControl(informerFactory.Core().V1().Pods(), informerFactory.Apps().V1().StatefulSets(), informerFactory.Apps().V1().ControllerRevisions())
