@@ -101,6 +101,9 @@ func (om *realStatefulPodControlObjectManager) CreateClaim(claim *v1.PersistentV
 }
 
 func (om *realStatefulPodControlObjectManager) GetClaim(namespace, claimName string) (*v1.PersistentVolumeClaim, error) {
+	if namespace == "" {
+		namespace = "default"
+	}
 	return om.claimLister.PersistentVolumeClaims(namespace).Get(claimName)
 }
 
