@@ -38,7 +38,6 @@ import (
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	appslisters "k8s.io/client-go/listers/apps/v1"
@@ -56,7 +55,7 @@ type invariantFunc func(set *apps.StatefulSet, om *fakeObjectManager) error
 
 func setupController(client clientset.Interface) (*fakeObjectManager, *fakeStatefulSetStatusUpdater, StatefulSetControlInterface, chan struct{}) {
 	informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
-	om := newFakeObjectManager(informerFactory.Core().V1().Pods(), informerFactory.Apps().V1().StatefulSets(), informerFactory.Apps().V1().ControllerRevisions())
+	om := newFakeObjectManager(informerFactory)
 	spc := NewStatefulPodControlFromManager(om, &noopRecorder{})
 	ssu := newFakeStatefulSetStatusUpdater(informerFactory.Apps().V1().StatefulSets())
 	recorder := &noopRecorder{}
@@ -613,7 +612,7 @@ func TestStatefulSetControl_getSetRevisions(t *testing.T) {
 	testFn := func(test *testcase, t *testing.T) {
 		client := fake.NewSimpleClientset()
 		informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
-		spc := NewStatefulPodControlFromManager(newFakeObjectManager(informerFactory.Core().V1().Pods(), informerFactory.Apps().V1().StatefulSets(), informerFactory.Apps().V1().ControllerRevisions()), &noopRecorder{})
+		spc := NewStatefulPodControlFromManager(newFakeObjectManager(informerFactory), &noopRecorder{})
 		ssu := newFakeStatefulSetStatusUpdater(informerFactory.Apps().V1().StatefulSets())
 		recorder := &noopRecorder{}
 		ssc := defaultStatefulSetControl{spc, ssu, history.NewFakeHistory(informerFactory.Apps().V1().ControllerRevisions()), recorder}
@@ -1839,14 +1838,18 @@ type fakeObjectManager struct {
 	deletePodTracker requestTracker
 }
 
-func newFakeObjectManager(podInformer coreinformers.PodInformer, setInformer appsinformers.StatefulSetInformer, revisionInformer appsinformers.ControllerRevisionInformer) *fakeObjectManager {
-	claimsIndexer := cache.NewIndexer(controller.KeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
+func newFakeObjectManager(informerFactory informers.SharedInformerFactory) *fakeObjectManager {
+	podInformer := informerFactory.Core().V1().Pods()
+	claimInformer :=  informerFactory.Core().V1().PersistentVolumeClaims()
+	setInformer := informerFactory.Apps().V1().StatefulSets()
+	revisionInformer := informerFactory.Apps().V1().ControllerRevisions()
+
 	return &fakeObjectManager{
 		podInformer.Lister(),
-		corelisters.NewPersistentVolumeClaimLister(claimsIndexer),
+		claimInformer.Lister(),
 		setInformer.Lister(),
 		podInformer.Informer().GetIndexer(),
-		claimsIndexer,
+		claimInformer.Informer().GetIndexer(),
 		setInformer.Informer().GetIndexer(),
 		revisionInformer.Informer().GetIndexer(),
 		requestTracker{0, nil, 0},
@@ -2212,7 +2215,7 @@ func checkClaimInvarients(set *apps.StatefulSet, pod *v1.Pod, claim *v1.Persiste
 	claimShouldBeRetained := policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType
 	if claim == nil {
 		if claimShouldBeRetained {
-			return fmt.Errorf("claim %s for Pod %s was not created", claim.Name, pod)
+			return fmt.Errorf("claim for Pod %s was not created", pod.Name)
 		}
 		return nil // A non-retained claim has no invariants to satisfy.
 	}
