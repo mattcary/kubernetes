@@ -26,12 +26,15 @@ import (
 	apps "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	core "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -634,6 +637,7 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 	om.podsIndexer.Add(pod1)
 	om.podsIndexer.Add(pod2)
 	om.podsIndexer.Add(pod3)
+	om.podsIndexer.Add(pod4)
 	selector, err := metav1.LabelSelectorAsSelector(set.Spec.Selector)
 	if err != nil {
 		t.Fatal(err)
@@ -651,6 +655,139 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 	want := sets.NewString(pod1.Name)
 	if !got.Equal(want) {
 		t.Errorf("getPodsForStatefulSet() = %v, want %v", got, want)
+	}
+}
+
+func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
+	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
+
+	testFn := func(t *testing.T, scaledownPolicy, setDeletionPolicy apps.PersistentVolumeClaimDeletePolicyType) {
+		set := newStatefulSet(4)
+		set.Spec.PersistentVolumeClaimPolicy.OnScaleDown = scaledownPolicy
+		set.Spec.PersistentVolumeClaimPolicy.OnSetDeletion = setDeletionPolicy
+		ssc, _, om, _ := newFakeStatefulSetController(set)
+		pods := []*v1.Pod{}
+		pods = append(pods, newStatefulSetPod(set, 0))
+		// pod1 is orphaned
+		pods = append(pods, newStatefulSetPod(set, 1))
+		pods[1].OwnerReferences = nil
+		// pod2 is owned but has wrong name.
+		pods = append(pods, newStatefulSetPod(set, 2))
+		pods[2].Name = "x" + pods[2].Name
+
+		om.setsIndexer.Add(set)
+
+		ssc.kubeClient.(*fake.Clientset).PrependReactor("patch", "pods", func(action core.Action) (bool, runtime.Object, error) {
+			patch := action.(core.PatchAction).GetPatch()
+			target := action.(core.PatchAction).GetName()
+			var pod *v1.Pod
+			for _, p := range pods {
+				if p.Name == target {
+					pod = p
+					break
+				}
+			}
+			if pod == nil {
+				t.Fatalf("Can't find patch target %s", target)
+			}
+			original, err := json.Marshal(pod)
+			if err != nil {
+				t.Fatalf("failed to marshal original pod %s: %v", pod.Name, err)
+			}
+			updated, err := strategicpatch.StrategicMergePatch(original, patch, v1.Pod{})
+			if err != nil {
+				t.Fatalf("failed to apply strategic merge patch %q on node %s: %v", patch, pod.Name, err)
+			}
+			if err := json.Unmarshal(updated, pod); err != nil {
+				t.Fatalf("failed to unmarshal updated pod %s: %v", pod.Name, err)
+			}
+
+			return true, pod, nil
+		})
+
+		for _, pod := range pods {
+			om.podsIndexer.Add(pod)
+			claims := getPersistentVolumeClaims(set, pod)
+			for _, claim := range claims {
+				om.CreateClaim(&claim)
+			}
+		}
+
+		for i, _ := range pods {
+			if _, err := om.setPodReady(set, i); err != nil {
+				t.Errorf("%d: %v", i, err)
+			}
+			if _, err := om.setPodRunning(set, i); err != nil {
+				t.Errorf("%d: %v", i, err)
+			}
+		}
+
+		// First sync to manage orphaned pod, then set replicas.
+		ssc.enqueueStatefulSet(set)
+		fakeWorker(ssc)
+		*set.Spec.Replicas = 0 // Put an ownerRef for all scale-down deleted PVCs.
+		ssc.enqueueStatefulSet(set)
+		fakeWorker(ssc)
+
+		hasNamedOwnerRef := func(claim *v1.PersistentVolumeClaim, name string) bool {
+			for _, ownerRef := range claim.GetOwnerReferences() {
+				if ownerRef.Name == name {
+					return true
+				}
+			}
+			return false
+		}
+		verifyOwnerRefs := func(claim *v1.PersistentVolumeClaim, condemned bool) {
+			podName := getClaimPodName(set, claim)
+			const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
+			const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+			switch {
+			case scaledownPolicy == retain && setDeletionPolicy == retain:
+				if hasNamedOwnerRef(claim, podName) || hasNamedOwnerRef(claim, set.Name) {
+					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
+				}
+			case scaledownPolicy == retain && setDeletionPolicy == delete:
+				if hasNamedOwnerRef(claim, podName) || !hasNamedOwnerRef(claim, set.Name) {
+					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
+				}
+			case scaledownPolicy == delete && setDeletionPolicy == retain:
+				if hasNamedOwnerRef(claim, podName) != condemned || hasNamedOwnerRef(claim, set.Name) {
+					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
+				}
+			case scaledownPolicy == delete && setDeletionPolicy == delete:
+				if hasNamedOwnerRef(claim, podName) != condemned || !hasNamedOwnerRef(claim, set.Name) {
+					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
+				}
+			}
+		}
+
+		claims, _ := om.claimsLister.PersistentVolumeClaims(set.Namespace).List(labels.Everything())
+		if len(claims) != len(pods) {
+			t.Errorf("Unexpected number of claims: %d", len(claims))
+		}
+		for _, claim := range claims {
+			// Only the first pod and the reclaimed orphan pod should have the correct owner refs.
+			switch claim.Name {
+			case "datadir-foo-0", "datadir-foo-1":
+				verifyOwnerRefs(claim, false)
+			case "datadir-foo-2":
+				if hasNamedOwnerRef(claim, getClaimPodName(set, claim)) || hasNamedOwnerRef(claim, set.Name) {
+					t.Errorf("unexpected ownerRefs for pod 4: %v", claim.GetOwnerReferences())
+				}
+			default:
+				t.Errorf("Unexpected claim %s", claim.Name)
+			}
+		}
+	}
+	policies := []apps.PersistentVolumeClaimDeletePolicyType{
+		apps.RetainPersistentVolumeClaimDeletePolicyType,
+		apps.DeletePersistentVolumeClaimDeletePolicyType,
+	}
+	for _, scaledownPolicy := range policies {
+		for _, setDeletionPolicy := range policies {
+			testName := fmt.Sprintf("ScaleDown: %s / SetDeletion: %s", scaledownPolicy, setDeletionPolicy)
+			t.Run(testName, func(t *testing.T) { testFn(t, scaledownPolicy, setDeletionPolicy) })
+		}
 	}
 }
 
@@ -767,7 +904,7 @@ func TestStaleOwnerRefOnScaleup(t *testing.T) {
 func newFakeStatefulSetController(initialObjects ...runtime.Object) (*StatefulSetController, *StatefulPodControl, *fakeObjectManager, history.Interface) {
 	client := fake.NewSimpleClientset(initialObjects...)
 	informerFactory := informers.NewSharedInformerFactory(client, controller.NoResyncPeriodFunc())
-	om := newFakeObjectManager(informerFactory.Core().V1().Pods(), informerFactory.Apps().V1().StatefulSets(), informerFactory.Apps().V1().ControllerRevisions())
+	om := newFakeObjectManager(informerFactory)
 	spc := NewStatefulPodControlFromManager(om, &noopRecorder{})
 	ssu := newFakeStatefulSetStatusUpdater(informerFactory.Apps().V1().StatefulSets())
 	ssc := NewStatefulSetController(
