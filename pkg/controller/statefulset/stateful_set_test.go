@@ -657,15 +657,21 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 func TestStaleOwnerRefOnScaleup(t *testing.T) {
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
 
-	for _, policy := range []apps.PersistentVolumeClaimDeletePolicyType{
-		apps.DeleteOnScaledownOnlyPersistentVolumeClaimDeletePolicyType,
-		apps.DeleteOnScaledownAndStatefulSetDeletionPersistentVolumeClaimDeletePolicyType,
+	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimPolicy{
+		&apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		},
+		&apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		},
 	} {
 		onPolicy := func(msg string, args ...interface{}) string {
 			return fmt.Sprintf(fmt.Sprintf("(%s) %s", policy, msg), args...)
 		}
 		set := newStatefulSet(3)
-		set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+		set.Spec.PersistentVolumeClaimPolicy = policy
 		ssc, spc, om, _ := newFakeStatefulSetController(set)
 		if err := scaleUpStatefulSetController(set, ssc, spc, om); err != nil {
 			t.Errorf(onPolicy("Failed to turn up StatefulSet : %s", err))
