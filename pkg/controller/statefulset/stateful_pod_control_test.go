@@ -507,15 +507,19 @@ func TestStatefulPodControlClaimsMatchDeletionPolcy(t *testing.T) {
 			indexer.Add(&claim)
 		}
 		control := NewStatefulPodControl(fakeClient, nil, claimLister, &noopRecorder{})
-		retainPolicy := apps.RetainPersistentVolumeClaimDeletePolicyType
-		set.Spec.PersistentVolumeClaimDeletePolicy = &retainPolicy
+		set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		}
 		if matches, err := control.ClaimsMatchDeletionPolicy(set, pod); err != nil {
 			t.Errorf("Unexpected error for ClaimsMatchDeletionPolicy (retain): %v", err)
 		} else if !matches {
 			t.Error("Unexpected non-match for ClaimsMatchDeletionPolicy (retain)")
 		}
-		setDeletePolicy := apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType
-		set.Spec.PersistentVolumeClaimDeletePolicy = &setDeletePolicy
+		set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		}
 		shouldMatch := !utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC)
 		if matches, err := control.ClaimsMatchDeletionPolicy(set, pod); err != nil {
 			t.Errorf("Unexpected error for ClaimsMatchDeletionPolicy (set deletion): %v", err)
@@ -550,8 +554,10 @@ func TestStatefulPodControlUpdatePodClaimForDeletionPolicy(t *testing.T) {
 			indexer.Add(&claim)
 		}
 		control := NewStatefulPodControl(fakeClient, nil, claimLister, &noopRecorder{})
-		policy := apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType
-		set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+		set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		}
 		if err := control.UpdatePodClaimForDeletionPolicy(set, pod); err != nil {
 			t.Errorf("Unexpected error for UpdatePodClaimForDeletionPolicy (retain): %v", err)
 		}
@@ -629,13 +635,15 @@ func TestPodClaimIsStale(t *testing.T) {
 			expected:    true,
 		},
 	}
-	scaledownPolicy := apps.DeleteOnScaledownOnlyPersistentVolumeClaimDeletePolicyType
 	testFn := func(t *testing.T) {
 		for _, tc := range testCases {
 			set := apps.StatefulSet{}
 			set.Name = "set"
 			set.Namespace = "default"
-			set.Spec.PersistentVolumeClaimDeletePolicy = &scaledownPolicy
+			set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+				OnScaleDown: apps.DeletePersistentVolumeClaimDeletePolicyType,
+				OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+			}
 			set.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{"key": "value"}}
 			claimIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 			for i, claimState := range tc.claimStates {
@@ -692,8 +700,10 @@ func TestStatefulPodControlRetainDeletionPolicyUpdate(t *testing.T) {
 	testFn := func(t *testing.T) {
 		recorder := record.NewFakeRecorder(10)
 		set := newStatefulSet(1)
-		policy := apps.RetainPersistentVolumeClaimDeletePolicyType
-		set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+		set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+			OnScaleDown: apps.RetainPersistentVolumeClaimDeletePolicyType,
+			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		}
 		pod := newStatefulSetPod(set, 0)
 		fakeClient := &fake.Clientset{}
 		podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
@@ -741,8 +751,10 @@ func TestStatefulPodControlDeletionPolicyUpdate(t *testing.T) {
 
 	recorder := record.NewFakeRecorder(10)
 	set := newStatefulSet(1)
-	policy := apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType
-	set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+	set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+		OnScaleDown: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+	}
 	pod := newStatefulSetPod(set, 0)
 	fakeClient := &fake.Clientset{}
 	podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
@@ -787,8 +799,10 @@ func TestStatefulPodControlDeletionPolicyUpdateMissingClaims(t *testing.T) {
 
 	recorder := record.NewFakeRecorder(10)
 	set := newStatefulSet(1)
-	policy := apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType
-	set.Spec.PersistentVolumeClaimDeletePolicy = &policy
+	set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
+		OnScaleDown: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+	}
 	pod := newStatefulSetPod(set, 0)
 	fakeClient := &fake.Clientset{}
 	podIndexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})

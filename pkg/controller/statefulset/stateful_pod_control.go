@@ -206,8 +206,9 @@ func (spc *StatefulPodControl) DeleteStatefulPod(set *apps.StatefulSet, pod *v1.
 func (spc *StatefulPodControl) ClaimsMatchDeletionPolicy(set *apps.StatefulSet, pod *v1.Pod) (bool, error) {
 	ordinal := getOrdinal(pod)
 	templates := set.Spec.VolumeClaimTemplates
-	policy := getPersistentVolumeClaimDeletePolicy(set)
-	claimShouldBeRetained := policy == apps.RetainPersistentVolumeClaimDeletePolicyType || policy == apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType
+	policy := getPersistentVolumeClaimPolicy(set)
+	// If PVCs are not deleted on scaledown, they are expected to exist.
+	claimShouldBeRetained := policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType
 	for i := range templates {
 		claimName := getPersistentVolumeClaimName(set, &templates[i], ordinal)
 		claim, err := spc.objectMgr.GetClaim(set.Namespace, claimName)
@@ -258,10 +259,9 @@ func (spc *StatefulPodControl) UpdatePodClaimForDeletionPolicy(set *apps.Statefu
 // DeleteOnScaledownAndStatefulSetDeletion policies, if a PVC has an ownerRef that does not match
 // the pod, it is stale. This includes pods whose UID has not been created.
 func (spc *StatefulPodControl) PodClaimIsStale(set *apps.StatefulSet, pod *v1.Pod) (bool, error) {
-	policy := getPersistentVolumeClaimDeletePolicy(set)
-	if policy == apps.RetainPersistentVolumeClaimDeletePolicyType ||
-		policy == apps.DeleteOnStatefulSetDeletionOnlyPersistentVolumeClaimDeletePolicyType {
-		// For these policies PVCs are reused and so can't be stale.
+	policy := getPersistentVolumeClaimPolicy(set)
+	if policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType {
+		// PVCs are meant to be reused and so can't be stale.
 		return false, nil
 	}
 	for _, claim := range getPersistentVolumeClaims(set, pod) {
