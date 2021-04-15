@@ -54,6 +54,7 @@ func TestStatefulPodControlCreatesPods(t *testing.T) {
 	})
 	fakeClient.AddReactor("create", "persistentvolumeclaims", func(action core.Action) (bool, runtime.Object, error) {
 		create := action.(core.CreateAction)
+		claimIndexer.Add(create.GetObject())
 		return true, create.GetObject(), nil
 	})
 	fakeClient.AddReactor("create", "pods", func(action core.Action) (bool, runtime.Object, error) {

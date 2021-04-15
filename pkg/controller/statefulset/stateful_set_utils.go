@@ -206,15 +206,20 @@ func claimOwnerMatchesSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.State
 // the StatefulSet. Returns true if the claim was changed and should be updated and false otherwise.
 func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.StatefulSet, pod *v1.Pod) bool {
 	needsUpdate := false
-	// Sometimes the version and kind are not set pod.TypeMeta. These are necessary for the ownerRef.
+	// Sometimes the version and kind are not set {pod,set}.TypeMeta. These are necessary for the ownerRef.
 	// TODO: there must be a better way to do this other than hardcoding the pod version?
+	updateMeta := func(tm *metav1.TypeMeta) {
+		if tm.APIVersion == "" {
+			tm.APIVersion = "v1"
+		}
+		if tm.Kind == "" {
+			tm.Kind = "Pod"
+		}
+	}
 	podMeta := pod.TypeMeta
-	if podMeta.APIVersion == "" {
-		podMeta.APIVersion = "v1"
-	}
-	if podMeta.Kind == "" {
-		podMeta.Kind = "Pod"
-	}
+	updateMeta(&podMeta)
+	setMeta := set.TypeMeta
+	updateMeta(&setMeta)
 	policy := getPersistentVolumeClaimPolicy(set)
 	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
 	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
@@ -226,7 +231,7 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
 		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 	case policy.OnScaleDown == retain && policy.OnSetDeletion == delete:
-		needsUpdate = setOwnerRef(claim, set, &set.TypeMeta) || needsUpdate
+		needsUpdate = setOwnerRef(claim, set, &setMeta) || needsUpdate
 		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 	case policy.OnScaleDown == delete && policy.OnSetDeletion == retain:
 		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
@@ -238,13 +243,14 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 		}
 	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
+		needsUpdate = setOwnerRef(claim, set, &setMeta) || needsUpdate
 		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
 		if podScaledDown {
 			needsUpdate = removeOwnerRef(claim, set) || needsUpdate
 			needsUpdate = setOwnerRef(claim, pod, &podMeta) || needsUpdate
 		}
 		if !podScaledDown {
-			needsUpdate = setOwnerRef(claim, set, &set.TypeMeta) || needsUpdate
+			needsUpdate = setOwnerRef(claim, set, &setMeta) || needsUpdate
 			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 		}
 	}

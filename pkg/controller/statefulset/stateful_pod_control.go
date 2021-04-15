@@ -26,6 +26,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	errorutils "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/klog/v2"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientset "k8s.io/client-go/kubernetes"
 	corelisters "k8s.io/client-go/listers/core/v1"
@@ -124,6 +125,12 @@ func (spc *StatefulPodControl) CreateStatefulPod(set *apps.StatefulSet, pod *v1.
 	if apierrors.IsAlreadyExists(err) {
 		return err
 	}
+	// Set PVC policy as much as is possible at this point.
+	if err := spc.UpdatePodClaimForDeletionPolicy(set, pod); err != nil {
+		spc.recordPodEvent("update", set, pod, err)
+		return err
+	}
+
 	spc.recordPodEvent("create", set, pod, err)
 	return err
 }
@@ -131,6 +138,7 @@ func (spc *StatefulPodControl) CreateStatefulPod(set *apps.StatefulSet, pod *v1.
 func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.Pod) error {
 	attemptedUpdate := false
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		klog.Infof("Starting update for %s", pod.Name)
 		// assume the Pod is consistent
 		consistent := true
 		// if the Pod does not conform to its identity, update the identity and dirty the Pod
@@ -148,6 +156,7 @@ func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.
 				return err
 			}
 		}
+		klog.Infof("Starting claims match for %s", pod.Name)
 		// if the Pod's PVCs are not consistent with the StatefulSet's PVC deletion policy, update the PVC
 		// and dirty the pod.
 		if match, err := spc.ClaimsMatchDeletionPolicy(set, pod); err != nil {
