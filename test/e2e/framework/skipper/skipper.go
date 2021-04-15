@@ -44,11 +44,12 @@ import (
 )
 
 // New local storage types to support local storage capacity isolation
-var localStorageCapacityIsolation featuregate.Feature = "LocalStorageCapacityIsolation"
 
 var (
-	downwardAPIHugePages featuregate.Feature = "DownwardAPIHugePages"
-	execProbeTimeout     featuregate.Feature = "ExecProbeTimeout"
+	localStorageCapacityIsolation featuregate.Feature = "LocalStorageCapacityIsolation"
+	downwardAPIHugePages          featuregate.Feature = "DownwardAPIHugePages"
+	execProbeTimeout              featuregate.Feature = "ExecProbeTimeout"
+	statefulSetAutoDeletePVC      featuregate.Feature = "StatefulSetAutoDeletePVC"
 )
 
 func skipInternalf(caller int, format string, args ...interface{}) {
@@ -151,6 +152,12 @@ func SkipUnlessDownwardAPIHugePagesEnabled() {
 func SkipUnlessExecProbeTimeoutEnabled() {
 	if !utilfeature.DefaultFeatureGate.Enabled(execProbeTimeout) {
 		skipInternalf(1, "Only supported when %v feature is enabled", execProbeTimeout)
+	}
+}
+
+func SkipUnlessStatefulSetAutoDeletePVCEnabled() {
+	if false && !utilfeature.DefaultFeatureGate.Enabled(statefulSetAutoDeletePVC) {
+		skipInternalf(1, "Only supported when %v feature is enabled", statefulSetAutoDeletePVC)
 	}
 }
 
