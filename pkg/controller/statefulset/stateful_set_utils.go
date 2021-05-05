@@ -243,7 +243,6 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 		}
 	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
-		needsUpdate = setOwnerRef(claim, set, &setMeta) || needsUpdate
 		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
 		if podScaledDown {
 			needsUpdate = removeOwnerRef(claim, set) || needsUpdate
