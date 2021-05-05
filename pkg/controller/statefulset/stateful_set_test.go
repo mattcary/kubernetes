@@ -663,9 +663,12 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 
 	testFn := func(t *testing.T, scaledownPolicy, setDeletionPolicy apps.PersistentVolumeClaimDeletePolicyType) {
 		set := newStatefulSet(4)
+		*set.Spec.Replicas = 2
 		set.Spec.PersistentVolumeClaimPolicy.OnScaleDown = scaledownPolicy
 		set.Spec.PersistentVolumeClaimPolicy.OnSetDeletion = setDeletionPolicy
 		ssc, _, om, _ := newFakeStatefulSetController(set)
+		om.setsIndexer.Add(set)
+
 		pods := []*v1.Pod{}
 		pods = append(pods, newStatefulSetPod(set, 0))
 		// pod1 is orphaned
@@ -674,8 +677,6 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 		// pod2 is owned but has wrong name.
 		pods = append(pods, newStatefulSetPod(set, 2))
 		pods[2].Name = "x" + pods[2].Name
-
-		om.setsIndexer.Add(set)
 
 		ssc.kubeClient.(*fake.Clientset).PrependReactor("patch", "pods", func(action core.Action) (bool, runtime.Object, error) {
 			patch := action.(core.PatchAction).GetPatch()
@@ -766,13 +767,13 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 			t.Errorf("Unexpected number of claims: %d", len(claims))
 		}
 		for _, claim := range claims {
-			// Only the first pod and the reclaimed orphan pod should have the correct owner refs.
+			// Only the first pod and the reclaimed orphan pod should have owner refs.
 			switch claim.Name {
 			case "datadir-foo-0", "datadir-foo-1":
 				verifyOwnerRefs(claim, false)
 			case "datadir-foo-2":
 				if hasNamedOwnerRef(claim, getClaimPodName(set, claim)) || hasNamedOwnerRef(claim, set.Name) {
-					t.Errorf("unexpected ownerRefs for pod 4: %v", claim.GetOwnerReferences())
+					t.Errorf("unexpected ownerRefs for %s: %v", claim.Name, claim.GetOwnerReferences())
 				}
 			default:
 				t.Errorf("Unexpected claim %s", claim.Name)
@@ -785,7 +786,7 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 	}
 	for _, scaledownPolicy := range policies {
 		for _, setDeletionPolicy := range policies {
-			testName := fmt.Sprintf("ScaleDown: %s / SetDeletion: %s", scaledownPolicy, setDeletionPolicy)
+			testName := fmt.Sprintf("ScaleDown:%s/SetDeletion:%s", scaledownPolicy, setDeletionPolicy)
 			t.Run(testName, func(t *testing.T) { testFn(t, scaledownPolicy, setDeletionPolicy) })
 		}
 	}
