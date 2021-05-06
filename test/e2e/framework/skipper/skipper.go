@@ -155,12 +155,6 @@ func SkipUnlessExecProbeTimeoutEnabled() {
 	}
 }
 
-func SkipUnlessStatefulSetAutoDeletePVCEnabled() {
-	if false && !utilfeature.DefaultFeatureGate.Enabled(statefulSetAutoDeletePVC) {
-		skipInternalf(1, "Only supported when %v feature is enabled", statefulSetAutoDeletePVC)
-	}
-}
-
 // SkipIfMissingResource skips if the gvr resource is missing.
 func SkipIfMissingResource(dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string) {
 	resourceClient := dynamicClient.Resource(gvr).Namespace(namespace)
