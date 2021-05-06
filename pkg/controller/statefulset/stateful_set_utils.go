@@ -208,18 +208,22 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 	needsUpdate := false
 	// Sometimes the version and kind are not set {pod,set}.TypeMeta. These are necessary for the ownerRef.
 	// TODO: there must be a better way to do this other than hardcoding the pod version?
-	updateMeta := func(tm *metav1.TypeMeta) {
+	updateMeta := func(tm *metav1.TypeMeta, kind string) {
 		if tm.APIVersion == "" {
-			tm.APIVersion = "v1"
+			if kind == "StatefulSet" {
+				tm.APIVersion = "apps/v1"
+			} else {
+				tm.APIVersion = "v1"
+			}
 		}
 		if tm.Kind == "" {
-			tm.Kind = "Pod"
+			tm.Kind = kind
 		}
 	}
 	podMeta := pod.TypeMeta
-	updateMeta(&podMeta)
+	updateMeta(&podMeta, "Pod")
 	setMeta := set.TypeMeta
-	updateMeta(&setMeta)
+	updateMeta(&setMeta, "StatefulSet")
 	policy := getPersistentVolumeClaimPolicy(set)
 	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
 	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
