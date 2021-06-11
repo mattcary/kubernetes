@@ -216,40 +216,40 @@ func TestUpdateStorage(t *testing.T) {
 	}
 }
 
-func TestGetPersistentVolumeClaimDeletePolicy(t *testing.T) {
-	retainPolicy := apps.StatefulSetPersistentVolumeClaimPolicy{
-		OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
-		OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+func TestGetPersistentVolumeClaimRetentionPolicy(t *testing.T) {
+	retainPolicy := apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenScaled:   apps.RetainPersistentVolumeClaimRetentionPolicyType,
+		WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 	}
-	scaledownPolicy := apps.StatefulSetPersistentVolumeClaimPolicy{
-		OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
-		OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+	scaledownPolicy := apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenScaled:   apps.DeletePersistentVolumeClaimRetentionPolicyType,
+		WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 	}
 	t.Run("StatefulSetAutoDeletePVCDisabled", func(t *testing.T) {
 		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, false)()
 		set := apps.StatefulSet{}
-		set.Spec.PersistentVolumeClaimPolicy = &retainPolicy
-		got := getPersistentVolumeClaimPolicy(&set)
-		if got.OnScaleDown != apps.RetainPersistentVolumeClaimDeletePolicyType || got.OnSetDeletion != apps.RetainPersistentVolumeClaimDeletePolicyType {
+		set.Spec.PersistentVolumeClaimRetentionPolicy = &retainPolicy
+		got := getPersistentVolumeClaimRetentionPolicy(&set)
+		if got.WhenScaled != apps.RetainPersistentVolumeClaimRetentionPolicyType || got.WhenDeleted != apps.RetainPersistentVolumeClaimRetentionPolicyType {
 			t.Errorf("Expected retain policy")
 		}
-		set.Spec.PersistentVolumeClaimPolicy = &scaledownPolicy
-		got = getPersistentVolumeClaimPolicy(&set)
-		if got.OnScaleDown != apps.RetainPersistentVolumeClaimDeletePolicyType || got.OnSetDeletion != apps.RetainPersistentVolumeClaimDeletePolicyType {
+		set.Spec.PersistentVolumeClaimRetentionPolicy = &scaledownPolicy
+		got = getPersistentVolumeClaimRetentionPolicy(&set)
+		if got.WhenScaled != apps.RetainPersistentVolumeClaimRetentionPolicyType || got.WhenDeleted != apps.RetainPersistentVolumeClaimRetentionPolicyType {
 			t.Errorf("Expected retain policy, again")
 		}
 	})
 	t.Run("StatefulSetAutoDeletePVCEnabled", func(t *testing.T) {
 		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
 		set := apps.StatefulSet{}
-		set.Spec.PersistentVolumeClaimPolicy = &retainPolicy
-		got := getPersistentVolumeClaimPolicy(&set)
-		if got.OnScaleDown != apps.RetainPersistentVolumeClaimDeletePolicyType || got.OnSetDeletion != apps.RetainPersistentVolumeClaimDeletePolicyType {
+		set.Spec.PersistentVolumeClaimRetentionPolicy = &retainPolicy
+		got := getPersistentVolumeClaimRetentionPolicy(&set)
+		if got.WhenScaled != apps.RetainPersistentVolumeClaimRetentionPolicyType || got.WhenDeleted != apps.RetainPersistentVolumeClaimRetentionPolicyType {
 			t.Errorf("Expected retain policy")
 		}
-		set.Spec.PersistentVolumeClaimPolicy = &scaledownPolicy
-		got = getPersistentVolumeClaimPolicy(&set)
-		if got.OnScaleDown != apps.DeletePersistentVolumeClaimDeletePolicyType || got.OnSetDeletion != apps.RetainPersistentVolumeClaimDeletePolicyType {
+		set.Spec.PersistentVolumeClaimRetentionPolicy = &scaledownPolicy
+		got = getPersistentVolumeClaimRetentionPolicy(&set)
+		if got.WhenScaled != apps.DeletePersistentVolumeClaimRetentionPolicyType || got.WhenDeleted != apps.RetainPersistentVolumeClaimRetentionPolicyType {
 			t.Errorf("Expected scaledown policy")
 		}
 	})
@@ -258,8 +258,8 @@ func TestGetPersistentVolumeClaimDeletePolicy(t *testing.T) {
 func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 	testCases := []struct {
 		name        string
-		scaleDownPolicy      apps.PersistentVolumeClaimDeletePolicyType
-		setDeletePolicy      apps.PersistentVolumeClaimDeletePolicyType
+		scaleDownPolicy      apps.PersistentVolumeClaimRetentionPolicyType
+		setDeletePolicy      apps.PersistentVolumeClaimRetentionPolicyType
 		needsPodRef bool
 		needsSetRef bool
 		replicas    int32
@@ -267,22 +267,22 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 	}{
 		{
 			name:        "retain",
-			scaleDownPolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: false,
 			needsSetRef: false,
 		},
 		{
 			name:        "on SS delete",
-			scaleDownPolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: false,
 			needsSetRef: true,
 		},
 		{
 			name:        "on scaledown only, condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: true,
 			needsSetRef: false,
 			replicas:    2,
@@ -290,8 +290,8 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 		},
 		{
 			name:        "on scaledown only, remains",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: false,
 			needsSetRef: false,
 			replicas:    2,
@@ -299,8 +299,8 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 		},
 		{
 			name:        "on both, condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: true,
 			needsSetRef: false,
 			replicas:    2,
@@ -308,8 +308,8 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 		},
 		{
 			name:        "on both, remains",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			needsPodRef: false,
 			needsSetRef: true,
 			replicas:    2,
@@ -330,9 +330,9 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 						set := apps.StatefulSet{}
 						set.Name = "stateful-set"
 						set.GetObjectMeta().SetUID("ss-456")
-						set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
-							OnScaleDown: tc.scaleDownPolicy,
-							OnSetDeletion: tc.setDeletePolicy,
+						set.Spec.PersistentVolumeClaimRetentionPolicy = &apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+							WhenScaled: tc.scaleDownPolicy,
+							WhenDeleted: tc.setDeletePolicy,
 						}
 						set.Spec.Replicas = &tc.replicas
 						if setPodRef {
@@ -379,56 +379,56 @@ func TestClaimOwnerMatchesSetAndPod(t *testing.T) {
 func TestUpdateClaimOwnerRefForSetAndPod(t *testing.T) {
 	testCases := []struct {
 		name        string
-		scaleDownPolicy      apps.PersistentVolumeClaimDeletePolicyType
-		setDeletePolicy      apps.PersistentVolumeClaimDeletePolicyType
+		scaleDownPolicy      apps.PersistentVolumeClaimRetentionPolicyType
+		setDeletePolicy      apps.PersistentVolumeClaimRetentionPolicyType
 		condemned   bool
 		needsPodRef bool
 		needsSetRef bool
 	}{
 		{
 			name:        "retain",
-			scaleDownPolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			condemned:   false,
 			needsPodRef: false,
 			needsSetRef: false,
 		},
 		{
 			name:        "delete with set",
-			scaleDownPolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			condemned:   false,
 			needsPodRef: false,
 			needsSetRef: true,
 		},
 		{
 			name:        "delete with scaledown, not condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			condemned:   false,
 			needsPodRef: false,
 			needsSetRef: false,
 		},
 		{
 			name:        "delete on scaledown, condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.RetainPersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			condemned:   true,
 			needsPodRef: true,
 			needsSetRef: false,
 		},
 		{
 			name:        "delete on both, not condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			condemned:   false,
 			needsPodRef: false,
 			needsSetRef: true,
 		},
 		{
 			name:        "delete on both, condemned",
-			scaleDownPolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
-			setDeletePolicy:      apps.DeletePersistentVolumeClaimDeletePolicyType,
+			scaleDownPolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			setDeletePolicy:      apps.DeletePersistentVolumeClaimRetentionPolicyType,
 			condemned:   true,
 			needsPodRef: true,
 			needsSetRef: false,
@@ -443,9 +443,9 @@ func TestUpdateClaimOwnerRefForSetAndPod(t *testing.T) {
 					numReplicas := int32(5)
 					set.Spec.Replicas = &numReplicas
 					set.SetUID("ss-123")
-					set.Spec.PersistentVolumeClaimPolicy = &apps.StatefulSetPersistentVolumeClaimPolicy{
-						OnScaleDown: tc.scaleDownPolicy,
-						OnSetDeletion: tc.setDeletePolicy,
+					set.Spec.PersistentVolumeClaimRetentionPolicy = &apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+						WhenScaled: tc.scaleDownPolicy,
+						WhenDeleted: tc.setDeletePolicy,
 					}
 					pod := v1.Pod{}
 					if tc.condemned {
@@ -883,9 +883,9 @@ func newStatefulSetWithVolumes(replicas int, name string, petMounts []v1.VolumeM
 			VolumeClaimTemplates:              claims,
 			ServiceName:                       "governingsvc",
 			UpdateStrategy:                    apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
-			PersistentVolumeClaimPolicy: &apps.StatefulSetPersistentVolumeClaimPolicy{
-				OnScaleDown: apps.RetainPersistentVolumeClaimDeletePolicyType,
-				OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+			PersistentVolumeClaimRetentionPolicy: &apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: apps.RetainPersistentVolumeClaimRetentionPolicyType,
+				WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			},
 			RevisionHistoryLimit: func() *int32 {
 				limit := int32(2)
@@ -934,9 +934,9 @@ func newStatefulSetWithLabels(replicas int, name string, uid types.UID, labels m
 				MatchExpressions: testMatchExpressions,
 			},
 			Replicas:                          func() *int32 { i := int32(replicas); return &i }(),
-			PersistentVolumeClaimPolicy: &apps.StatefulSetPersistentVolumeClaimPolicy{
-				OnScaleDown: apps.RetainPersistentVolumeClaimDeletePolicyType,
-				OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+			PersistentVolumeClaimRetentionPolicy: &apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: apps.RetainPersistentVolumeClaimRetentionPolicyType,
+				WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 			},
 			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{

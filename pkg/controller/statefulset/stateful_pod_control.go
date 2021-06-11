@@ -126,7 +126,7 @@ func (spc *StatefulPodControl) CreateStatefulPod(set *apps.StatefulSet, pod *v1.
 		return err
 	}
 	// Set PVC policy as much as is possible at this point.
-	if err := spc.UpdatePodClaimForDeletionPolicy(set, pod); err != nil {
+	if err := spc.UpdatePodClaimForRetentionPolicy(set, pod); err != nil {
 		spc.recordPodEvent("update", set, pod, err)
 		return err
 	}
@@ -159,7 +159,7 @@ func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.
 		klog.Infof("Starting claims match for %s", pod.Name)
 		// if the Pod's PVCs are not consistent with the StatefulSet's PVC deletion policy, update the PVC
 		// and dirty the pod.
-		if match, err := spc.ClaimsMatchDeletionPolicy(set, pod); err != nil {
+		if match, err := spc.ClaimsMatchRetentionPolicy(set, pod); err != nil {
 			if consistent {
 				// Oops, something has gone badly wrong.
 				spc.recordPodEvent("update", set, pod, err)
@@ -168,7 +168,7 @@ func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.
 			// Otherwise the error may be due to some other update, and we'll have to reconcile the next time around.
 			// TODO: does the reconcile need to be sped up?
 		} else if !match {
-			if err := spc.UpdatePodClaimForDeletionPolicy(set, pod); err != nil {
+			if err := spc.UpdatePodClaimForRetentionPolicy(set, pod); err != nil {
 				spc.recordPodEvent("update", set, pod, err)
 				return err
 			}
@@ -209,15 +209,15 @@ func (spc *StatefulPodControl) DeleteStatefulPod(set *apps.StatefulSet, pod *v1.
 	return err
 }
 
-// ClaimsMatchDeletionPolicy returns false if the PVCs for pod are not consistent with set's PVC deletion policy.
+// ClaimsMatchRetentionPolicy returns false if the PVCs for pod are not consistent with set's PVC deletion policy.
 // An error is returned if something is not consistent. This is expected if the pod is being otherwise updated,
 // but a problem otherwise (see usage of this method in UpdateStatefulPod).
-func (spc *StatefulPodControl) ClaimsMatchDeletionPolicy(set *apps.StatefulSet, pod *v1.Pod) (bool, error) {
+func (spc *StatefulPodControl) ClaimsMatchRetentionPolicy(set *apps.StatefulSet, pod *v1.Pod) (bool, error) {
 	ordinal := getOrdinal(pod)
 	templates := set.Spec.VolumeClaimTemplates
-	policy := getPersistentVolumeClaimPolicy(set)
+	policy := getPersistentVolumeClaimRetentionPolicy(set)
 	// If PVCs are not deleted on scaledown, they are expected to exist.
-	claimShouldBeRetained := policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType
+	claimShouldBeRetained := policy.WhenScaled == apps.RetainPersistentVolumeClaimRetentionPolicyType
 	for i := range templates {
 		claimName := getPersistentVolumeClaimName(set, &templates[i], ordinal)
 		claim, err := spc.objectMgr.GetClaim(set.Namespace, claimName)
@@ -237,8 +237,8 @@ func (spc *StatefulPodControl) ClaimsMatchDeletionPolicy(set *apps.StatefulSet, 
 	return true, nil
 }
 
-// UpdatePodClaimForDeletionPolicy updates the PVCs used by pod to match the PVC deletion policy of set.
-func (spc *StatefulPodControl) UpdatePodClaimForDeletionPolicy(set *apps.StatefulSet, pod *v1.Pod) error {
+// UpdatePodClaimForRetentionPolicy updates the PVCs used by pod to match the PVC deletion policy of set.
+func (spc *StatefulPodControl) UpdatePodClaimForRetentionPolicy(set *apps.StatefulSet, pod *v1.Pod) error {
 	ordinal := getOrdinal(pod)
 	templates := set.Spec.VolumeClaimTemplates
 	for i := range templates {
@@ -268,8 +268,8 @@ func (spc *StatefulPodControl) UpdatePodClaimForDeletionPolicy(set *apps.Statefu
 // DeleteOnScaledownAndStatefulSetDeletion policies, if a PVC has an ownerRef that does not match
 // the pod, it is stale. This includes pods whose UID has not been created.
 func (spc *StatefulPodControl) PodClaimIsStale(set *apps.StatefulSet, pod *v1.Pod) (bool, error) {
-	policy := getPersistentVolumeClaimPolicy(set)
-	if policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType {
+	policy := getPersistentVolumeClaimRetentionPolicy(set)
+	if policy.WhenScaled == apps.RetainPersistentVolumeClaimRetentionPolicyType {
 		// PVCs are meant to be reused and so can't be stale.
 		return false, nil
 	}
