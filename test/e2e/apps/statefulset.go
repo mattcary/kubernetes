@@ -1128,7 +1128,6 @@ var _ = SIGDescribe("StatefulSet", func() {
 	})
 
 	ginkgo.Describe("Non-retain StatefulSetPersistentVolumeClaimPolicy [Feature:StatefulSetAutoDeletePVC]", func() {
-		SkipIfStatefulSetAutoDeletePCVCFeatureFlagNotSet();
 		ssName := "ss"
 		labels := map[string]string{
 			"foo": "bar",
@@ -1157,12 +1156,12 @@ var _ = SIGDescribe("StatefulSet", func() {
 			e2estatefulset.DeleteAllStatefulSets(c, ns)
 		})
 
-		ginkgo.It("should delete PVCs with a OnSetDeletion policy", func() {
+		ginkgo.It("should delete PVCs with a WhenDeleted policy", func() {
 			e2epv.SkipIfNoDefaultStorageClass(c)
 			ginkgo.By("Creating statefulset " + ssName + " in namespace " + ns)
 			*(ss.Spec.Replicas) = 3
-			ss.Spec.PersistentVolumeClaimPolicy = &appsv1.StatefulSetPersistentVolumeClaimPolicy{
-				OnSetDeletion: appsv1.DeletePersistentVolumeClaimDeletePolicyType,
+			ss.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
 			}
 			_, err := c.AppsV1().StatefulSets(ns).Create(context.TODO(), ss, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
@@ -1184,8 +1183,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 			e2epv.SkipIfNoDefaultStorageClass(c)
 			ginkgo.By("Creating statefulset " + ssName + " in namespace " + ns)
 			*(ss.Spec.Replicas) = 3
-			ss.Spec.PersistentVolumeClaimPolicy = &appsv1.StatefulSetPersistentVolumeClaimPolicy{
-				OnScaleDown: appsv1.DeletePersistentVolumeClaimDeletePolicyType,
+			ss.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
 			}
 			_, err := c.AppsV1().StatefulSets(ns).Create(context.TODO(), ss, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
@@ -1203,12 +1202,12 @@ var _ = SIGDescribe("StatefulSet", func() {
 			framework.ExpectNoError(err)
 		})
 
-		ginkgo.It("should delete PVCs after adopting pod (OnSetDeletion)", func() {
+		ginkgo.It("should delete PVCs after adopting pod (WhenDeleted)", func() {
 			e2epv.SkipIfNoDefaultStorageClass(c)
 			ginkgo.By("Creating statefulset " + ssName + " in namespace " + ns)
 			*(ss.Spec.Replicas) = 3
-			ss.Spec.PersistentVolumeClaimPolicy = &appsv1.StatefulSetPersistentVolumeClaimPolicy{
-				OnSetDeletion: appsv1.DeletePersistentVolumeClaimDeletePolicyType,
+			ss.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
 			}
 			_, err := c.AppsV1().StatefulSets(ns).Create(context.TODO(), ss, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
@@ -1233,12 +1232,12 @@ var _ = SIGDescribe("StatefulSet", func() {
 			framework.ExpectNoError(err)
 		})
 
-		ginkgo.It("should delete PVCs after adopting pod (OnScaledown) [Feature:StatefulSetAutoDeletePVC]", func() {
+		ginkgo.It("should delete PVCs after adopting pod (WhenScaled) [Feature:StatefulSetAutoDeletePVC]", func() {
 			e2epv.SkipIfNoDefaultStorageClass(c)
 			ginkgo.By("Creating statefulset " + ssName + " in namespace " + ns)
 			*(ss.Spec.Replicas) = 3
-			ss.Spec.PersistentVolumeClaimPolicy = &appsv1.StatefulSetPersistentVolumeClaimPolicy{
-				OnScaleDown: appsv1.DeletePersistentVolumeClaimDeletePolicyType,
+			ss.Spec.PersistentVolumeClaimRetentionPolicy = &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+				WhenScaled: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
 			}
 			_, err := c.AppsV1().StatefulSets(ns).Create(context.TODO(), ss, metav1.CreateOptions{})
 			framework.ExpectNoError(err)
@@ -1748,10 +1747,15 @@ func verifyStatefulSetPVCsExist(c clientset.Interface, ss *appsv1.StatefulSet, c
 }
 
 // verifyStatefulSetPVCsExistWithOwnerRefs works as verifyStatefulSetPVCsExist, but also waits for the ownerRefs to match.
-func verifyStatefulSetPVCsExistWithOwnerRefs(c clientset.Interface, ss *appsv1.StatefulSet, claimIds []int, wantSetRef, wantPodRef bool) error {
-	idSet := map[int]struct{}{}
-	for _, id := range claimIds {
-		idSet[id] = struct{}{}
+func verifyStatefulSetPVCsExistWithOwnerRefs(c clientset.Interface, ss *appsv1.StatefulSet, claimIndicies []int, wantSetRef, wantPodRef bool) error {
+	indexSet := map[int]struct{}{}
+	for _, id := range claimIndicies {
+		indexSet[id] = struct{}{}
+	}
+	set := getStatefulSet(c, ss.Namespace, ss.Name)
+	setUID := set.GetUID()
+	if setUID == "" {
+		framework.Failf("Statefulset %s mising UID", ss.Name)
 	}
 	return wait.PollImmediate(e2estatefulset.StatefulSetPoll, e2estatefulset.StatefulSetTimeout, func() (bool, error) {
 		pvcList, err := c.CoreV1().PersistentVolumeClaims(ss.Namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: klabels.Everything().String()})
@@ -1772,25 +1776,37 @@ func verifyStatefulSetPVCsExistWithOwnerRefs(c clientset.Interface, ss *appsv1.S
 					framework.Logf("ERROR: bad pvc name %s (%v)", pvc.Name, err)
 					return false, err
 				}
-				if _, found := idSet[int(ordinal)]; !found {
+				if _, found := indexSet[int(ordinal)]; !found {
 					framework.Logf("Unexpected, retrying")
 					return false, nil // Retry until the PVCs are consistent.
 				}
 				var foundSetRef, foundPodRef bool
 				// Check owner references by looking at Kind and Name. Verifying the UID is awkward.
 				for _, ref := range pvc.GetOwnerReferences() {
-					if ref.Kind == "StatefulSet" && ref.Name == ss.Name {
+					if ref.Kind == "StatefulSet" && ref.UID == setUID {
 						foundSetRef = true
 					}
-					if ref.Kind == "Pod" && ref.Name == fmt.Sprintf("%s-%d", ss.Name, ordinal) {
-						foundPodRef = true
+					if ref.Kind == "Pod" {
+						podName := fmt.Sprintf("%s-%d", ss.Name, ordinal)
+						pod, err := c.CoreV1().Pods(ss.Namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+						if err != nil {
+							framework.Logf("Pod %s not found, retrying (%v)", podName, err)
+							return false, nil
+						}
+						podUID := pod.GetUID()
+						if podUID == "" {
+							framework.Failf("Pod %s is missing UID", pod.Name)
+						}
+						if ref.UID == podUID {
+							foundPodRef = true
+						}
 					}
 				}
 				if foundSetRef == wantSetRef && foundPodRef == wantPodRef {
 					seenPVCs[int(ordinal)] = struct{}{}
 				}
 			}
-			if len(seenPVCs) != len(idSet) {
+			if len(seenPVCs) != len(indexSet) {
 				framework.Logf("Only %d PVCs, retrying", len(seenPVCs))
 				return false, nil // Retry until the PVCs are consistent.
 			}

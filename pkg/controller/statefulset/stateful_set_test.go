@@ -661,11 +661,11 @@ func TestGetPodsForStatefulSetRelease(t *testing.T) {
 func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
 
-	testFn := func(t *testing.T, scaledownPolicy, setDeletionPolicy apps.PersistentVolumeClaimDeletePolicyType) {
+	testFn := func(t *testing.T, scaledownPolicy, deletionPolicy apps.PersistentVolumeClaimRetentionPolicyType) {
 		set := newStatefulSet(4)
 		*set.Spec.Replicas = 2
-		set.Spec.PersistentVolumeClaimPolicy.OnScaleDown = scaledownPolicy
-		set.Spec.PersistentVolumeClaimPolicy.OnSetDeletion = setDeletionPolicy
+		set.Spec.PersistentVolumeClaimRetentionPolicy.WhenScaled = scaledownPolicy
+		set.Spec.PersistentVolumeClaimRetentionPolicy.WhenDeleted = deletionPolicy
 		ssc, _, om, _ := newFakeStatefulSetController(set)
 		om.setsIndexer.Add(set)
 
@@ -740,22 +740,22 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 		}
 		verifyOwnerRefs := func(claim *v1.PersistentVolumeClaim, condemned bool) {
 			podName := getClaimPodName(set, claim)
-			const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
-			const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+			const retain = apps.RetainPersistentVolumeClaimRetentionPolicyType
+			const delete = apps.DeletePersistentVolumeClaimRetentionPolicyType
 			switch {
-			case scaledownPolicy == retain && setDeletionPolicy == retain:
+			case scaledownPolicy == retain && deletionPolicy == retain:
 				if hasNamedOwnerRef(claim, podName) || hasNamedOwnerRef(claim, set.Name) {
 					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
 				}
-			case scaledownPolicy == retain && setDeletionPolicy == delete:
+			case scaledownPolicy == retain && deletionPolicy == delete:
 				if hasNamedOwnerRef(claim, podName) || !hasNamedOwnerRef(claim, set.Name) {
 					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
 				}
-			case scaledownPolicy == delete && setDeletionPolicy == retain:
+			case scaledownPolicy == delete && deletionPolicy == retain:
 				if hasNamedOwnerRef(claim, podName) != condemned || hasNamedOwnerRef(claim, set.Name) {
 					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
 				}
-			case scaledownPolicy == delete && setDeletionPolicy == delete:
+			case scaledownPolicy == delete && deletionPolicy == delete:
 				if hasNamedOwnerRef(claim, podName) != condemned || !hasNamedOwnerRef(claim, set.Name) {
 					t.Errorf("bad claim ownerRefs: %s: %v", claim.Name, claim.GetOwnerReferences())
 				}
@@ -780,14 +780,14 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 			}
 		}
 	}
-	policies := []apps.PersistentVolumeClaimDeletePolicyType{
-		apps.RetainPersistentVolumeClaimDeletePolicyType,
-		apps.DeletePersistentVolumeClaimDeletePolicyType,
+	policies := []apps.PersistentVolumeClaimRetentionPolicyType{
+		apps.RetainPersistentVolumeClaimRetentionPolicyType,
+		apps.DeletePersistentVolumeClaimRetentionPolicyType,
 	}
 	for _, scaledownPolicy := range policies {
-		for _, setDeletionPolicy := range policies {
-			testName := fmt.Sprintf("ScaleDown:%s/SetDeletion:%s", scaledownPolicy, setDeletionPolicy)
-			t.Run(testName, func(t *testing.T) { testFn(t, scaledownPolicy, setDeletionPolicy) })
+		for _, deletionPolicy := range policies {
+			testName := fmt.Sprintf("ScaleDown:%s/SetDeletion:%s", scaledownPolicy, deletionPolicy)
+			t.Run(testName, func(t *testing.T) { testFn(t, scaledownPolicy, deletionPolicy) })
 		}
 	}
 }
@@ -795,21 +795,21 @@ func TestOrphanedPodsWithPVCDeletePolicy(t *testing.T) {
 func TestStaleOwnerRefOnScaleup(t *testing.T) {
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, true)()
 
-	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimPolicy{
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 		},
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.DeletePersistentVolumeClaimRetentionPolicyType,
 		},
 	} {
 		onPolicy := func(msg string, args ...interface{}) string {
 			return fmt.Sprintf(fmt.Sprintf("(%s) %s", policy, msg), args...)
 		}
 		set := newStatefulSet(3)
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		ssc, spc, om, _ := newFakeStatefulSetController(set)
 		if err := scaleUpStatefulSetController(set, ssc, spc, om); err != nil {
 			t.Errorf(onPolicy("Failed to turn up StatefulSet : %s", err))

@@ -82,35 +82,35 @@ func setMinReadySeconds(set *apps.StatefulSet, minReadySeconds int32) *apps.Stat
 	return set
 }
 
-func runTestOverPVCDeletePolicies(t *testing.T, testName string, testFn func(*testing.T, *apps.StatefulSetPersistentVolumeClaimPolicy)) {
+func runTestOverPVCRetentionPolicies(t *testing.T, testName string, testFn func(*testing.T, *apps.StatefulSetPersistentVolumeClaimRetentionPolicy)) {
 	subtestName := "StatefulSetAutoDeletePVCDisabled"
 	if testName != "" {
 		subtestName = fmt.Sprintf("%s/%s", testName, subtestName)
 	}
 	t.Run(subtestName, func(t *testing.T) {
 		defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.StatefulSetAutoDeletePVC, false)()
-		testFn(t, &apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		testFn(t, &apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 		})
 	})
 
-	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimPolicy{
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+	for _, policy := range []*apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 		},
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 		},
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.RetainPersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.DeletePersistentVolumeClaimRetentionPolicyType,
 		},
-		&apps.StatefulSetPersistentVolumeClaimPolicy{
-			OnScaleDown:   apps.DeletePersistentVolumeClaimDeletePolicyType,
-			OnSetDeletion: apps.DeletePersistentVolumeClaimDeletePolicyType,
+		&apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+			WhenScaled:   apps.DeletePersistentVolumeClaimRetentionPolicyType,
+			WhenDeleted: apps.DeletePersistentVolumeClaimRetentionPolicyType,
 		},
 	} {
 		subtestName := pvcDeletePolicyString(policy) + "/StatefulSetAutoDeletePVCEnabled"
@@ -124,17 +124,17 @@ func runTestOverPVCDeletePolicies(t *testing.T, testName string, testFn func(*te
 	}
 }
 
-func pvcDeletePolicyString(policy *apps.StatefulSetPersistentVolumeClaimPolicy) string {
-	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
-	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+func pvcDeletePolicyString(policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) string {
+	const retain = apps.RetainPersistentVolumeClaimRetentionPolicyType
+	const delete = apps.DeletePersistentVolumeClaimRetentionPolicyType
 	switch {
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == retain && policy.WhenDeleted == retain:
 		return "Retain"
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == retain && policy.WhenDeleted == delete:
 		return "SetDeleteOnly"
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == delete && policy.WhenDeleted == retain:
 		return "ScaleDownOnly"
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == delete && policy.WhenDeleted == delete:
 		return "Delete"
 	}
 	return "invalid"
@@ -166,21 +166,21 @@ func TestStatefulSetControl(t *testing.T) {
 		}
 		testObj := testCase.obj
 		testFn := testCase.fn
-		runTestOverPVCDeletePolicies(
+		runTestOverPVCRetentionPolicies(
 			t,
 			fmt.Sprintf("%s/Monotonic", fnName),
-			func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+			func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 				set := testObj()
-				set.Spec.PersistentVolumeClaimPolicy = policy
+				set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 				testFn(t, set, assertMonotonicInvariants)
 			},
 		)
-		runTestOverPVCDeletePolicies(
+		runTestOverPVCRetentionPolicies(
 			t,
 			fmt.Sprintf("%s/Burst", fnName),
-			func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+			func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 				set := burst(testObj())
-				set.Spec.PersistentVolumeClaimPolicy = policy
+				set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 				testFn(t, set, assertBurstInvariants)
 			},
 		)
@@ -553,10 +553,10 @@ func PodRecreateDeleteFailure(t *testing.T, set *apps.StatefulSet, invariants in
 }
 
 func TestStatefulSetControlScaleDownDeleteError(t *testing.T) {
-	runTestOverPVCDeletePolicies(
-		t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(
+		t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 			set := newStatefulSet(3)
-			set.Spec.PersistentVolumeClaimPolicy = policy
+			set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 			invariants := assertMonotonicInvariants
 			client := fake.NewSimpleClientset(set)
 			om, _, ssc, stop := setupController(client)
@@ -668,10 +668,10 @@ func TestStatefulSetControl_getSetRevisions(t *testing.T) {
 		return clone
 	}
 
-	runTestOverPVCDeletePolicies(
-		t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(
+		t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 			set := newStatefulSet(3)
-			set.Spec.PersistentVolumeClaimPolicy = policy
+			set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 			set.Status.CollisionCount = new(int32)
 			rev0 := newRevisionOrDie(set, 1)
 			set1 := set.DeepCopy()
@@ -913,9 +913,9 @@ func TestStatefulSetControlOnDeleteUpdate(t *testing.T) {
 
 	originalImage := newStatefulSet(3).Spec.Template.Spec.Containers[0].Image
 
-	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		set := test.initial()
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		set.Spec.UpdateStrategy = apps.StatefulSetUpdateStrategy{Type: apps.OnDeleteStatefulSetStrategyType}
 		client := fake.NewSimpleClientset(set)
 		om, _, ssc, stop := setupController(client)
@@ -1202,7 +1202,7 @@ func TestStatefulSetControlOnDeleteUpdate(t *testing.T) {
 			},
 		},
 	}
-	runTestOverPVCDeletePolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		for i := range tests {
 			testFn(t, &tests[i], policy)
 		}
@@ -1219,9 +1219,9 @@ func TestStatefulSetControlRollingUpdateWithPartition(t *testing.T) {
 		validate   func(set *apps.StatefulSet, pods []*v1.Pod) error
 	}
 
-	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		set := test.initial()
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		set.Spec.UpdateStrategy = apps.StatefulSetUpdateStrategy{
 			Type: apps.RollingUpdateStatefulSetStrategyType,
 			RollingUpdate: func() *apps.RollingUpdateStatefulSetStrategy {
@@ -1361,7 +1361,7 @@ func TestStatefulSetControlRollingUpdateWithPartition(t *testing.T) {
 			},
 		},
 	}
-	runTestOverPVCDeletePolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		for i := range tests {
 			testFn(t, &tests[i], policy)
 		}
@@ -1369,10 +1369,10 @@ func TestStatefulSetControlRollingUpdateWithPartition(t *testing.T) {
 }
 
 func TestStatefulSetHonorRevisionHistoryLimit(t *testing.T) {
-	runTestOverPVCDeletePolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		invariants := assertMonotonicInvariants
 		set := newStatefulSet(3)
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		client := fake.NewSimpleClientset(set)
 		om, ssu, ssc, stop := setupController(client)
 		defer close(stop)
@@ -1414,9 +1414,9 @@ func TestStatefulSetControlLimitsHistory(t *testing.T) {
 		initial    func() *apps.StatefulSet
 	}
 
-	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		set := test.initial()
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		client := fake.NewSimpleClientset(set)
 		om, _, ssc, stop := setupController(client)
 		defer close(stop)
@@ -1474,7 +1474,7 @@ func TestStatefulSetControlLimitsHistory(t *testing.T) {
 			},
 		},
 	}
-	runTestOverPVCDeletePolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		for i := range tests {
 			testFn(t, &tests[i], policy)
 		}
@@ -1493,9 +1493,9 @@ func TestStatefulSetControlRollback(t *testing.T) {
 
 	originalImage := newStatefulSet(3).Spec.Template.Spec.Containers[0].Image
 
-	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	testFn := func(t *testing.T, test *testcase, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		set := test.initial()
-		set.Spec.PersistentVolumeClaimPolicy = policy
+		set.Spec.PersistentVolumeClaimRetentionPolicy = policy
 		client := fake.NewSimpleClientset(set)
 		om, _, ssc, stop := setupController(client)
 		defer close(stop)
@@ -1733,7 +1733,7 @@ func TestStatefulSetControlRollback(t *testing.T) {
 			},
 		},
 	}
-	runTestOverPVCDeletePolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimPolicy) {
+	runTestOverPVCRetentionPolicies(t, "", func(t *testing.T, policy *apps.StatefulSetPersistentVolumeClaimRetentionPolicy) {
 		for i := range tests {
 			testFn(t, &tests[i], policy)
 		}
@@ -1840,7 +1840,7 @@ type fakeObjectManager struct {
 
 func newFakeObjectManager(informerFactory informers.SharedInformerFactory) *fakeObjectManager {
 	podInformer := informerFactory.Core().V1().Pods()
-	claimInformer :=  informerFactory.Core().V1().PersistentVolumeClaims()
+	claimInformer := informerFactory.Core().V1().PersistentVolumeClaims()
 	setInformer := informerFactory.Apps().V1().StatefulSets()
 	revisionInformer := informerFactory.Apps().V1().ControllerRevisions()
 
@@ -2205,14 +2205,14 @@ func assertUpdateInvariants(set *apps.StatefulSet, om *fakeObjectManager) error 
 }
 
 func checkClaimInvarients(set *apps.StatefulSet, pod *v1.Pod, claim *v1.PersistentVolumeClaim, ordinal int) error {
-	policy := apps.StatefulSetPersistentVolumeClaimPolicy{
-		OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
-		OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType,
+	policy := apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenScaled:   apps.RetainPersistentVolumeClaimRetentionPolicyType,
+		WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
 	}
-	if set.Spec.PersistentVolumeClaimPolicy != nil && utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) {
-		policy = *set.Spec.PersistentVolumeClaimPolicy
+	if set.Spec.PersistentVolumeClaimRetentionPolicy != nil && utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) {
+		policy = *set.Spec.PersistentVolumeClaimRetentionPolicy
 	}
-	claimShouldBeRetained := policy.OnScaleDown == apps.RetainPersistentVolumeClaimDeletePolicyType
+	claimShouldBeRetained := policy.WhenScaled == apps.RetainPersistentVolumeClaimRetentionPolicyType
 	if claim == nil {
 		if claimShouldBeRetained {
 			return fmt.Errorf("claim for Pod %s was not created", pod.Name)
@@ -2225,24 +2225,24 @@ func checkClaimInvarients(set *apps.StatefulSet, pod *v1.Pod, claim *v1.Persiste
 		return nil
 	}
 
-	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
-	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+	const retain = apps.RetainPersistentVolumeClaimRetentionPolicyType
+	const delete = apps.DeletePersistentVolumeClaimRetentionPolicyType
 	switch {
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == retain && policy.WhenDeleted == retain:
 		if hasOwnerRef(claim, set) {
 			return fmt.Errorf("claim %s has unexpected owner ref on %s for StatefulSet retain", claim.Name, set.Name)
 		}
 		if hasOwnerRef(claim, pod) {
 			return fmt.Errorf("claim %s has unexpected owner ref on pod %s for StatefulSet retain", claim.Name, pod.Name)
 		}
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == retain && policy.WhenDeleted == delete:
 		if !hasOwnerRef(claim, set) {
 			return fmt.Errorf("claim %s does not have owner ref on %s for StatefulSet deletion", claim.Name, set.Name)
 		}
 		if hasOwnerRef(claim, pod) {
 			return fmt.Errorf("claim %s has unexpected owner ref on pod %s for StatefulSet deletion", claim.Name, pod.Name)
 		}
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == delete && policy.WhenDeleted == retain:
 		if hasOwnerRef(claim, set) {
 			return fmt.Errorf("claim %s has unexpected owner ref on %s for scaledown only", claim.Name, set.Name)
 		}
@@ -2252,7 +2252,7 @@ func checkClaimInvarients(set *apps.StatefulSet, pod *v1.Pod, claim *v1.Persiste
 		if ordinal < int(*set.Spec.Replicas) && hasOwnerRef(claim, pod) {
 			return fmt.Errorf("claim %s has unexpected owner ref on condemned pod %s for scaledown delete", claim.Name, pod.Name)
 		}
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == delete && policy.WhenDeleted == delete:
 		if ordinal >= int(*set.Spec.Replicas) {
 			if !hasOwnerRef(claim, pod) || hasOwnerRef(claim, set) {
 				return fmt.Errorf("condemned claim %s has bad owner refs: %v", claim.Name, claim.GetOwnerReferences())

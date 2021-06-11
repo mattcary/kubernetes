@@ -486,10 +486,11 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 
 	// Ensure ownerRefs are set correctly for the condemned pods.
 	for i := range condemned {
-		if matchPolicy, err := ssc.podControl.ClaimsMatchDeletionPolicy(updateSet, condemned[i]); err != nil {
+		if matchPolicy, err := ssc.podControl.ClaimsMatchRetentionPolicy(updateSet, condemned[i]); err != nil {
 			return &status, err
 		} else if !matchPolicy {
-			if err := ssc.podControl.UpdatePodClaimForDeletionPolicy(updateSet, condemned[i]); err != nil {
+			klog.Infof("StatefulSet updating pods condemned pod %s", condemned[i].Name)
+			if err := ssc.podControl.UpdatePodClaimForRetentionPolicy(updateSet, condemned[i]); err != nil {
 				return &status, err
 			}
 		}

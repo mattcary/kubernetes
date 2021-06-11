@@ -149,13 +149,13 @@ func storageMatches(set *apps.StatefulSet, pod *v1.Pod) bool {
 
 // getPersistentVolumeClaimPolicy returns the PVC policy for a StatefulSet, respecting
 // any feature flags.
-func getPersistentVolumeClaimPolicy(set *apps.StatefulSet) apps.StatefulSetPersistentVolumeClaimPolicy {
-	policy := apps.StatefulSetPersistentVolumeClaimPolicy{
-		OnSetDeletion: apps.RetainPersistentVolumeClaimDeletePolicyType, 
-		OnScaleDown:   apps.RetainPersistentVolumeClaimDeletePolicyType,
+func getPersistentVolumeClaimRetentionPolicy(set *apps.StatefulSet) apps.StatefulSetPersistentVolumeClaimRetentionPolicy {
+	policy := apps.StatefulSetPersistentVolumeClaimRetentionPolicy{
+		WhenDeleted: apps.RetainPersistentVolumeClaimRetentionPolicyType,
+		WhenScaled:  apps.RetainPersistentVolumeClaimRetentionPolicyType,
 	}
-	if utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) && set.Spec.PersistentVolumeClaimPolicy != nil {
-		policy = *set.Spec.PersistentVolumeClaimPolicy
+	if utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) && set.Spec.PersistentVolumeClaimRetentionPolicy != nil {
+		policy = *set.Spec.PersistentVolumeClaimRetentionPolicy
 	}
 	return policy
 }
@@ -163,24 +163,24 @@ func getPersistentVolumeClaimPolicy(set *apps.StatefulSet) apps.StatefulSetPersi
 // claimOwnerMatchesSetAndPod returns false if the ownerRefs of the claim are not set consistently with the
 // PVC deletion policy for the StatefulSet.
 func claimOwnerMatchesSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.StatefulSet, pod *v1.Pod) bool {
-	policy := getPersistentVolumeClaimPolicy(set)
-	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
-	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+	policy := getPersistentVolumeClaimRetentionPolicy(set)
+	const retain = apps.RetainPersistentVolumeClaimRetentionPolicyType
+	const delete = apps.DeletePersistentVolumeClaimRetentionPolicyType
 	switch {
 	default:
-		klog.Errorf("Unknown policy %v; treating as Retain", set.Spec.PersistentVolumeClaimPolicy)
+		klog.Errorf("Unknown policy %v; treating as Retain", set.Spec.PersistentVolumeClaimRetentionPolicy)
 		fallthrough
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == retain && policy.WhenDeleted == retain:
 		if hasOwnerRef(claim, set) ||
 			hasOwnerRef(claim, pod) {
 			return false
 		}
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == retain && policy.WhenDeleted == delete:
 		if !hasOwnerRef(claim, set) ||
 			hasOwnerRef(claim, pod) {
 			return false
 		}
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == delete && policy.WhenDeleted == retain:
 		if hasOwnerRef(claim, set) {
 			return false
 		}
@@ -188,7 +188,7 @@ func claimOwnerMatchesSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.State
 		if podScaledDown != hasOwnerRef(claim, pod) {
 			return false
 		}
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == delete && policy.WhenDeleted == delete:
 		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
 		// If a pod is scaled down, there should be no set ref and a pod ref;
 		// if the pod is not scaled down it's the other way around.
@@ -224,20 +224,21 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 	updateMeta(&podMeta, "Pod")
 	setMeta := set.TypeMeta
 	updateMeta(&setMeta, "StatefulSet")
-	policy := getPersistentVolumeClaimPolicy(set)
-	const retain = apps.RetainPersistentVolumeClaimDeletePolicyType
-	const delete = apps.DeletePersistentVolumeClaimDeletePolicyType
+	klog.Infof("StatefulSet updating ownerref for %s set %s(%s) pod %s(%s)", claim.Name, set.Name, set.GetName(), pod.Name, pod.GetName())
+	policy := getPersistentVolumeClaimRetentionPolicy(set)
+	const retain = apps.RetainPersistentVolumeClaimRetentionPolicyType
+	const delete = apps.DeletePersistentVolumeClaimRetentionPolicyType
 	switch {
 	default:
-		klog.Errorf("Unknown policy %v, treating as Retain", set.Spec.PersistentVolumeClaimPolicy)
+		klog.Errorf("Unknown policy %v, treating as Retain", set.Spec.PersistentVolumeClaimRetentionPolicy)
 		fallthrough
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == retain && policy.WhenDeleted == retain:
 		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
 		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
-	case policy.OnScaleDown == retain && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == retain && policy.WhenDeleted == delete:
 		needsUpdate = setOwnerRef(claim, set, &setMeta) || needsUpdate
 		needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == retain:
+	case policy.WhenScaled == delete && policy.WhenDeleted == retain:
 		needsUpdate = removeOwnerRef(claim, set) || needsUpdate
 		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
 		if podScaledDown {
@@ -246,7 +247,7 @@ func updateClaimOwnerRefForSetAndPod(claim *v1.PersistentVolumeClaim, set *apps.
 		if !podScaledDown {
 			needsUpdate = removeOwnerRef(claim, pod) || needsUpdate
 		}
-	case policy.OnScaleDown == delete && policy.OnSetDeletion == delete:
+	case policy.WhenScaled == delete && policy.WhenDeleted == delete:
 		podScaledDown := getOrdinal(pod) >= int(*set.Spec.Replicas)
 		if podScaledDown {
 			needsUpdate = removeOwnerRef(claim, set) || needsUpdate

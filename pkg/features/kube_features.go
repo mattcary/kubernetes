@@ -821,7 +821,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	ProbeTerminationGracePeriod:                    {Default: false, PreRelease: featuregate.Alpha},
 	RunAsGroup:                                     {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.22
 	PodDeletionCost:                                {Default: true, PreRelease: featuregate.Beta},
-	StatefulSetAutoDeletePVC:                       {Default: false, PreRelease: featuregate.Alpha},
+	StatefulSetAutoDeletePVC:                       {Default: true, PreRelease: featuregate.Alpha},
 	TopologyAwareHints:                             {Default: false, PreRelease: featuregate.Alpha},
 	PodAffinityNamespaceSelector:                   {Default: true, PreRelease: featuregate.Beta},
 	ServiceLoadBalancerClass:                       {Default: false, PreRelease: featuregate.Alpha},
