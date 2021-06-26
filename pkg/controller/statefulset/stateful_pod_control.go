@@ -114,6 +114,7 @@ func (om *realStatefulPodControlObjectManager) UpdateClaim(claim *v1.PersistentV
 }
 
 func (spc *StatefulPodControl) CreateStatefulPod(set *apps.StatefulSet, pod *v1.Pod) error {
+	klog.Infof("Creating pod %s", pod.Name)
 	// Create the Pod's PVCs prior to creating the Pod
 	if err := spc.createPersistentVolumeClaims(set, pod); err != nil {
 		spc.recordPodEvent("create", set, pod, err)
@@ -136,6 +137,7 @@ func (spc *StatefulPodControl) CreateStatefulPod(set *apps.StatefulSet, pod *v1.
 }
 
 func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.Pod) error {
+	klog.Infof("Updating pod %s", pod.Name)
 	attemptedUpdate := false
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		// assume the Pod is consistent
@@ -147,6 +149,7 @@ func (spc *StatefulPodControl) UpdateStatefulPod(set *apps.StatefulSet, pod *v1.
 		}
 		// if the Pod does not conform to the StatefulSet's storage requirements, update the Pod's PVC's,
 		// dirty the Pod, and create any missing PVCs
+		klog.Infof("Checking storage for pod %s", pod.Name)
 		if !storageMatches(set, pod) {
 			updateStorage(set, pod)
 			consistent = false

@@ -118,6 +118,7 @@ func isMemberOf(set *apps.StatefulSet, pod *v1.Pod) bool {
 // identityMatches returns true if pod has a valid identity and network identity for a member of set.
 func identityMatches(set *apps.StatefulSet, pod *v1.Pod) bool {
 	parent, ordinal := getParentNameAndOrdinal(pod)
+	klog.Infof("identity match for %s/%s: parent %s:%d, set %s/%s, label %s", pod.Namespace, pod.Name, parent, ordinal, set.Namespace, set.Name, pod.Labels[apps.StatefulSetPodNameLabel])
 	return ordinal >= 0 &&
 		set.Name == parent &&
 		pod.Name == getPodName(set, ordinal) &&
@@ -371,6 +372,7 @@ func updateStorage(set *apps.StatefulSet, pod *v1.Pod) {
 }
 
 func initIdentity(set *apps.StatefulSet, pod *v1.Pod) {
+	klog.Infof("init pod %s", pod)
 	updateIdentity(set, pod)
 	// Set these immutable fields only on initial Pod creation, not updates.
 	pod.Spec.Hostname = pod.Name
@@ -380,6 +382,7 @@ func initIdentity(set *apps.StatefulSet, pod *v1.Pod) {
 // updateIdentity updates pod's name, hostname, and subdomain, and StatefulSetPodNameLabel to conform to set's name
 // and headless service.
 func updateIdentity(set *apps.StatefulSet, pod *v1.Pod) {
+	klog.Infof("Updating identity for pod %s in set %s", pod.Name, set.Name)
 	pod.Name = getPodName(set, getOrdinal(pod))
 	pod.Namespace = set.Namespace
 	if pod.Labels == nil {

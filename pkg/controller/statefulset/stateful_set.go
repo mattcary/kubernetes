@@ -351,10 +351,14 @@ func (ssc *StatefulSetController) getStatefulSetsForPod(pod *v1.Pod) []*apps.Sta
 	if len(sets) > 1 {
 		// ControllerRef will ensure we don't do anything crazy, but more than one
 		// item in this list nevertheless constitutes user error.
+		setNames := []string{}
+		for _, s := range sets {
+			setNames = append(setNames, s.Name)
+		}
 		utilruntime.HandleError(
 			fmt.Errorf(
-				"user error: more than one StatefulSet is selecting pods with labels: %+v",
-				pod.Labels))
+				"user error: more than one StatefulSet is selecting pods with labels: %+v. Sets: %v",
+				pod.Labels, setNames))
 	}
 	return sets
 }

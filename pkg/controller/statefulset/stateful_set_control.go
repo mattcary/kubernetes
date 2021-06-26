@@ -301,6 +301,7 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 
 	// First we partition pods into two lists valid replicas and condemned Pods
 	for i := range pods {
+		klog.Infof("looking at update of pod %s", pods[i].Name)
 		status.Replicas++
 
 		// count the number of running and ready replicas
@@ -331,10 +332,11 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			// if the ordinal of the pod is within the range of the current number of replicas,
 			// insert it at the indirection of its ordinal
 			replicas[ord] = pods[i]
-
+			klog.Infof("pod %s is current replica", pods[i].Name)
 		} else if ord >= replicaCount {
 			// if the ordinal is greater than the number of replicas add it to the condemned list
 			condemned = append(condemned, pods[i])
+			klog.Infof("pod %s is condemned", pods[i].Name)
 		}
 		// If the ordinal could not be parsed (ord < 0), ignore the Pod.
 	}
@@ -474,7 +476,8 @@ func (ssc *defaultStatefulSetControl) updateStatefulSet(
 			return &status, nil
 		}
 		// Enforce the StatefulSet invariants
-		if identityMatches(set, replicas[i]) && storageMatches(set, replicas[i]) {
+		retentionMatch, retentionErr := ssc.podControl.ClaimsMatchRetentionPolicy(updateSet, replicas[i])
+		if identityMatches(set, replicas[i]) && storageMatches(set, replicas[i]) && retentionErr == nil && retentionMatch {
 			continue
 		}
 		// Make a deep copy so we don't mutate the shared cache
