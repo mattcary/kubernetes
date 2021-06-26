@@ -1781,7 +1781,6 @@ func verifyStatefulSetPVCsExistWithOwnerRefs(c clientset.Interface, ss *appsv1.S
 					return false, nil // Retry until the PVCs are consistent.
 				}
 				var foundSetRef, foundPodRef bool
-				// Check owner references by looking at Kind and Name. Verifying the UID is awkward.
 				for _, ref := range pvc.GetOwnerReferences() {
 					if ref.Kind == "StatefulSet" && ref.UID == setUID {
 						foundSetRef = true
