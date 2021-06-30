@@ -341,6 +341,12 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding) 
 			eventsRule(),
 		},
 	})
+	var statefulSetPVCRule rbacv1.PolicyRule
+	if utilfeature.DefaultFeatureGate.Enabled(features.StatefulSetAutoDeletePVC) {
+		statefulSetPVCRule = rbacv1helpers.NewRule("get", "create", "update", "list").Groups(legacyGroup).Resources("persistentvolumeclaims").RuleOrDie()
+	} else {
+		statefulSetPVCRule = rbacv1helpers.NewRule("get", "create").Groups(legacyGroup).Resources("persistentvolumeclaims").RuleOrDie()
+	}
 	addControllerRole(&controllerRoles, &controllerRoleBindings, rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: saRolePrefix + "statefulset-controller"},
 		Rules: []rbacv1.PolicyRule{
@@ -350,7 +356,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding) 
 			rbacv1helpers.NewRule("update").Groups(appsGroup).Resources("statefulsets/finalizers").RuleOrDie(),
 			rbacv1helpers.NewRule("get", "create", "delete", "update", "patch").Groups(legacyGroup).Resources("pods").RuleOrDie(),
 			rbacv1helpers.NewRule("get", "create", "delete", "update", "patch", "list", "watch").Groups(appsGroup).Resources("controllerrevisions").RuleOrDie(),
-			rbacv1helpers.NewRule("get", "create").Groups(legacyGroup).Resources("persistentvolumeclaims").RuleOrDie(),
+			statefulSetPVCRule,
 			eventsRule(),
 		},
 	})
